@@ -50,7 +50,7 @@ class WhisperWorker:
             return ASRChunkResult(text="", start_ms=0, end_ms=0, language=language, confidence=None, raw_segments=[])
 
         audio = audio_np.astype(np.float32)
-        # NOTE: For true low-latency streaming, chunk size/VAD overlap must be tuned with FastRTC frame cadence.
+        # NOTE: For low-latency behavior, chunk size and VAD settings must be tuned against the browser audio frame cadence.
         segments, info = self.model.transcribe(
             audio,
             language=language,

@@ -1,5 +1,6 @@
 streamlit>=1.39
-fastrtc>=0.0.15
+streamlit-webrtc>=0.64.0
+av>=14.0.0
 faster-whisper>=1.1.0
 openai>=1.54.0
 httpx>=0.27.0

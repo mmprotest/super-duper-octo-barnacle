@@ -4,14 +4,15 @@ from dataclasses import dataclass, field, replace
 import threading
 from typing import Any
 
-from live_subtitles_local.asr.schemas import SessionConfig, TranscriptSegment, TranslationSegment
+from live_subtitles_local.asr.schemas import MicrophoneState, SessionConfig, TranscriptSegment, TranslationSegment
 
 
 @dataclass(slots=True)
 class WorkerHealth:
-    rtc_running: bool = False
+    microphone_state: MicrophoneState = "inactive"
     asr_loaded: bool = False
     translation_ready: bool = False
+    translator_last_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -20,6 +21,7 @@ class MetricsSnapshot:
     translation_queue_size: int = 0
     last_asr_latency_ms: int | None = None
     last_translation_latency_ms: int | None = None
+    received_audio_frames: int = 0
 
 
 @dataclass(slots=True)
@@ -85,7 +87,7 @@ class ThreadSafeAppState:
                     self._translation_history[-1] = translation
             self._metrics.last_translation_latency_ms = translation.latency_ms
 
-    def set_worker_health(self, **kwargs: bool) -> None:
+    def set_worker_health(self, **kwargs: bool | str | None) -> None:
         with self._lock:
             for key, value in kwargs.items():
                 setattr(self._worker_health, key, value)
