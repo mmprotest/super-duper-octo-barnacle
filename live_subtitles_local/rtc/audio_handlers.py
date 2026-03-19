@@ -87,5 +87,5 @@ class SilenceDetector:
         return rms < self.threshold
 
     def boundary_hint(self, audio_frame: np.ndarray) -> bool:
-        # Hook for future FastRTC cadence-specific logic; currently silence is our boundary cue.
+        # Silence currently acts as the segment boundary cue for chunked local transcription.
         return self.is_silent(audio_frame)

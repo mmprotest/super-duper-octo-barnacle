@@ -6,6 +6,7 @@ import time
 
 TranscriptState = Literal["partial", "provisional", "final"]
 TranslationState = Literal["draft", "final"]
+MicrophoneState = Literal["inactive", "starting", "active", "failed"]
 
 
 @dataclass(slots=True)
@@ -36,7 +37,6 @@ class TranslationSegment:
 
 @dataclass(slots=True)
 class SessionConfig:
-    input_device: str | None = None
     target_language: str = "en"
     source_language_mode: str = "auto"
     source_language: str | None = None
