@@ -13,6 +13,10 @@ class WorkerHealth:
     asr_loaded: bool = False
     translation_ready: bool = False
     translator_last_error: str | None = None
+    rtc_mode: str = "local_direct"
+    rtc_turn_configured: bool = False
+    rtc_description: str = "Local/direct WebRTC mode. No external STUN/TURN servers are configured."
+    rtc_connection_guidance: str = "For localhost browser-to-local-server use, TURN is usually unnecessary."
 
 
 @dataclass(slots=True)

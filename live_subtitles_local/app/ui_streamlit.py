@@ -11,6 +11,7 @@ from live_subtitles_local.app.renderer import render_subtitles
 from live_subtitles_local.asr.schemas import SessionConfig
 from live_subtitles_local.pipeline.orchestrator import LiveSubtitleOrchestrator
 from live_subtitles_local.rtc.audio_handlers import normalize_audio_frame
+from live_subtitles_local.rtc.rtc_config import resolve_rtc_settings
 from live_subtitles_local.rtc.stream_events import AudioFrameEvent
 
 CONFIG_PATH = str(Path(__file__).resolve().parents[1] / "config" / "default.yaml")
@@ -65,6 +66,27 @@ def _sidebar_config(defaults: SessionConfig) -> tuple[SessionConfig, bool, bool,
     return config, start_clicked, stop_clicked, debug
 
 
+def _sync_rtc_status(orchestrator: LiveSubtitleOrchestrator, rtc_settings) -> None:
+    orchestrator.state.set_worker_health(
+        rtc_mode=rtc_settings.mode,
+        rtc_turn_configured=rtc_settings.turn_configured,
+        rtc_description=rtc_settings.description,
+        rtc_connection_guidance=rtc_settings.connection_guidance,
+    )
+    orchestrator.state.set_debug(
+        "rtc_configuration",
+        {
+            "mode": rtc_settings.mode,
+            "turn_configured": rtc_settings.turn_configured,
+            "ice_server_count": rtc_settings.ice_server_count,
+            "sources": rtc_settings.sources,
+            "warnings": rtc_settings.warnings,
+            "frontend_rtc_configuration": rtc_settings.frontend_rtc_configuration,
+            "server_rtc_configuration": rtc_settings.server_rtc_configuration,
+        },
+    )
+
+
 def _set_microphone_state(orchestrator: LiveSubtitleOrchestrator, desired: bool, playing: bool, signalling: bool) -> None:
     if playing:
         state = "active"
@@ -109,15 +131,21 @@ def render_app() -> None:
     st.set_page_config(page_title="Local Live Subtitles", layout="wide")
     st.title("Local live transcription + translation subtitles")
     st.caption(
-        "This app is Streamlit-native: microphone transport runs through streamlit-webrtc, not FastRTC. "
-        "Whisper and translation run locally on the server side."
+        "This app is Streamlit-native: microphone transport runs through streamlit-webrtc with explicit ICE config. "
+        "Hugging Face TURN is disabled; local mode uses direct/local WebRTC only."
     )
 
     _ensure_stream_state()
+    rtc_settings = resolve_rtc_settings()
     orchestrator = get_orchestrator()
+    _sync_rtc_status(orchestrator, rtc_settings)
     defaults = orchestrator.state.snapshot().config
     config, start_clicked, stop_clicked, debug = _sidebar_config(defaults)
     orchestrator.update_config(config)
+
+    if rtc_settings.warnings:
+        for warning in rtc_settings.warnings:
+            st.warning(warning)
 
     if start_clicked:
         st.session_state[STREAM_DESIRED] = True
@@ -135,6 +163,8 @@ def render_app() -> None:
         mode=WebRtcMode.SENDONLY,
         desired_playing_state=desired_streaming,
         media_stream_constraints={"audio": True, "video": False},
+        frontend_rtc_configuration=rtc_settings.frontend_rtc_configuration,
+        server_rtc_configuration=rtc_settings.server_rtc_configuration,
         audio_receiver_size=256,
         sendback_audio=False,
     )
@@ -155,15 +185,17 @@ def render_app() -> None:
         st.subheader("How this build really works")
         st.markdown(
             "- **Capture:** browser microphone via `streamlit-webrtc` (`webrtc_streamer`, SENDONLY mode).\n"
+            f"- **RTC mode:** `{rtc_settings.mode}`; TURN configured=`{rtc_settings.turn_configured}`.\n"
             "- **ASR:** chunked audio is sent to local `faster-whisper`.\n"
             "- **Translation:** stable segments are translated via the configured local OpenAI-compatible endpoint.\n"
-            "- **No FastRTC path exists in this refactor:** Streamlit is the UI *and* the browser media ingress layer."
+            "- **No Hugging Face TURN fallback remains:** all RTC config is explicit and environment-driven."
         )
         st.subheader("Still not magic")
         st.markdown(
             "- Browser microphone access still depends on localhost/HTTPS and user permission.\n"
             "- Whisper latency depends heavily on GPU speed and chunk size.\n"
-            "- Translation remains segment-level, not token-level streaming."
+            "- Translation remains segment-level, not token-level streaming.\n"
+            "- Remote deployments may still need TURN, but local localhost usage typically does not."
         )
 
     if hasattr(st, "fragment"):
