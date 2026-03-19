@@ -53,3 +53,9 @@ class SessionConfig:
     max_visible_lines: int = 6
     provisional_debounce_ms: int = 450
     final_silence_ms: int = 1200
+    receiver_queue_size: int = 1024
+    audio_ring_buffer_seconds: float = 8.0
+    asr_window_ms: int = 3200
+    asr_overlap_ms: int = 800
+    asr_poll_interval_ms: int = 350
+    translation_queue_size: int = 64

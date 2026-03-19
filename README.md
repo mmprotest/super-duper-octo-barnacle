@@ -75,11 +75,12 @@ If `REMOTE_DEPLOYMENT=true` is set without TURN, the app still starts, but the U
 
 ```text
 Browser microphone (streamlit-webrtc / WebRTC)
-  -> Streamlit app drains inbound audio frames
-  -> rtc.audio_handlers normalize/chunk audio
-  -> asr.whisper_worker transcribes chunks on local GPU
+  -> Streamlit app drains inbound audio frames as fast as possible
+  -> rtc.audio_handlers cheaply normalizes/resamples PCM
+  -> pipeline.audio_buffer keeps a bounded latest-audio ring buffer
+  -> orchestrator ASR worker wakes every ~350 ms and transcribes a rolling 3.2 s window with overlap
   -> asr.stabilizer merges updates into revisable segments
-  -> translation.translator translates provisional/final segments only
+  -> translation worker translates provisional/final segments only
   -> app.state stores thread-safe snapshots
   -> app.renderer/ui_streamlit render rolling subtitles in Streamlit
 ```
@@ -87,18 +88,20 @@ Browser microphone (streamlit-webrtc / WebRTC)
 ## What works cleanly
 
 - Start/Stop control a real browser microphone stream.
-- Whisper receives real audio frames from the browser media stream.
+- Whisper now runs off the dedicated ASR worker rather than the WebRTC receive path.
 - RTC configuration is explicit instead of relying on implicit provider fallback.
 - The UI shows whether RTC is using local/direct mode or remote env-driven mode.
 - The UI shows whether TURN is configured.
 - Translation health is derived from an actual `/models` health check plus runtime translation success/failure.
 - The UI shows microphone state as `inactive`, `starting`, `active`, or `failed`.
+- The UI surfaces receiver backlog, ring-buffer fill, ASR lag, average ASR latency, and overload/drop signals.
 
 ## What does not work magically
 
 - This is still **not token-level realtime translation**.
 - Browser microphone access still depends on **localhost or HTTPS** and user permission.
 - Whisper latency depends heavily on GPU, model size, and chunk duration.
+- If ASR falls behind, the app explicitly skips stale intermediate windows and keeps the newest audio/transcript work.
 - Remote deployments may still require TURN depending on network topology.
 
 ## Local runtime requirements
@@ -115,6 +118,7 @@ Browser microphone (streamlit-webrtc / WebRTC)
 - `live_subtitles_local/asr`: dataclasses, Whisper wrapper, and transcript stabilizer
 - `live_subtitles_local/translation`: prompt, client, translator, and in-memory cache
 - `live_subtitles_local/pipeline`: orchestration, queues, and stale job scheduling
+- `live_subtitles_local/pipeline/audio_buffer.py`: bounded latest-audio PCM ring buffer and overload accounting
 - `live_subtitles_local/export`: transcript/SRT/JSONL export helpers
 - `live_subtitles_local/config/default.yaml`: sane local defaults
 - `live_subtitles_local/tests`: lightweight unit tests

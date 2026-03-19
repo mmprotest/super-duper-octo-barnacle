@@ -27,10 +27,18 @@ def render_subtitles(snapshot: AppSnapshot, debug: bool = False) -> None:
     col3.metric("Translator", "ready" if health.translation_ready else "unavailable")
     st.caption(
         f"{mic_icon} {mic_label} · audio frames={snapshot.metrics.received_audio_frames} · "
-        f"audio queue={snapshot.metrics.audio_queue_size} · translation queue={snapshot.metrics.translation_queue_size}"
+        f"receiver queue={snapshot.metrics.receiver_queue_size if snapshot.metrics.receiver_queue_size is not None else 'n/a'}/{snapshot.metrics.receiver_queue_capacity} · "
+        f"translation queue={snapshot.metrics.translation_queue_size}"
     )
     if health.translator_last_error:
         st.caption(f"Translator health detail: {health.translator_last_error}")
+    if snapshot.metrics.dropped_audio_chunks or snapshot.metrics.dropped_stale_asr_windows:
+        st.error(
+            "Audio ingest overloaded: stale audio work is being dropped to preserve the latest transcript."
+        )
+    elif snapshot.metrics.receiver_queue_size and snapshot.metrics.receiver_queue_capacity:
+        if snapshot.metrics.receiver_queue_size >= int(snapshot.metrics.receiver_queue_capacity * 0.8):
+            st.warning("Receiver queue is nearing capacity; ASR is close to falling behind.")
 
     st.subheader("RTC configuration")
     rtc_col1, rtc_col2, rtc_col3 = st.columns(3)
@@ -84,9 +92,24 @@ def render_subtitles(snapshot: AppSnapshot, debug: bool = False) -> None:
         st.markdown(f"- {marker} **{segment.text}**")
 
     st.subheader("Latency")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     col1.metric("ASR latency", snapshot.metrics.last_asr_latency_ms or 0)
     col2.metric("Translation latency", snapshot.metrics.last_translation_latency_ms or 0)
+    col3.metric("ASR lag", snapshot.metrics.asr_worker_lag_ms or 0)
+
+    st.subheader("Pipeline metrics")
+    pipe1, pipe2, pipe3 = st.columns(3)
+    pipe1.metric(
+        "Ring buffer fill",
+        f"{snapshot.metrics.ring_buffer_fill_ms} ms",
+        delta=f"{snapshot.metrics.ring_buffer_fill_samples}/{snapshot.metrics.ring_buffer_capacity_samples} samples",
+    )
+    pipe2.metric("Avg ASR latency", snapshot.metrics.average_asr_latency_ms or 0)
+    pipe3.metric("Dropped stale ASR windows", snapshot.metrics.dropped_stale_asr_windows)
+    st.caption(
+        f"dropped audio chunks={snapshot.metrics.dropped_audio_chunks} · dropped audio samples={snapshot.metrics.dropped_audio_samples} · "
+        f"stale-skip events={snapshot.metrics.stale_asr_skips} · dropped translation jobs={snapshot.metrics.dropped_translation_jobs}"
+    )
 
     if snapshot.last_error_message:
         st.error(snapshot.last_error_message)

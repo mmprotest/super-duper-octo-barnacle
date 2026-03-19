@@ -11,14 +11,23 @@ class PipelineScheduler:
     def __init__(self, queues: PipelineQueues) -> None:
         self.queues = queues
 
-    def submit_translation(self, job: TranslationJob) -> None:
+    def submit_translation(self, job: TranslationJob) -> int:
         drained: list[TranslationJob] = []
         try:
             while True:
                 drained.append(self.queues.translation_queue.get_nowait())
         except queue.Empty:
             pass
-        kept = [existing for existing in drained if existing.segment.segment_id != job.segment.segment_id]
+        kept: list[TranslationJob] = []
+        dropped = 0
+        for existing in drained:
+            same_segment = existing.segment.segment_id == job.segment.segment_id
+            stale_revision = existing.segment.revision <= job.segment.revision
+            if same_segment and stale_revision:
+                dropped += 1
+                continue
+            kept.append(existing)
         for item in kept:
             self.queues.translation_queue.put_nowait(item)
         self.queues.translation_queue.put_nowait(job)
+        return dropped

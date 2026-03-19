@@ -37,6 +37,13 @@ def _sidebar_config(defaults: SessionConfig) -> tuple[SessionConfig, bool, bool,
         start_clicked = st.button("Start", use_container_width=True)
         stop_clicked = st.button("Stop", use_container_width=True)
         debug = st.toggle("Debug", value=False)
+        with st.expander("Pipeline tuning", expanded=False):
+            receiver_queue_size = st.number_input("Receiver queue size", min_value=256, max_value=4096, step=256, value=defaults.receiver_queue_size)
+            audio_ring_buffer_seconds = st.number_input("Audio ring buffer (s)", min_value=4.0, max_value=30.0, step=1.0, value=float(defaults.audio_ring_buffer_seconds))
+            asr_window_ms = st.number_input("ASR rolling window (ms)", min_value=1000, max_value=8000, step=100, value=defaults.asr_window_ms)
+            asr_overlap_ms = st.number_input("ASR overlap (ms)", min_value=0, max_value=3000, step=100, value=defaults.asr_overlap_ms)
+            asr_poll_interval_ms = st.number_input("ASR wake interval (ms)", min_value=250, max_value=1000, step=50, value=defaults.asr_poll_interval_ms)
+            translation_queue_size = st.number_input("Translation queue size", min_value=8, max_value=256, step=8, value=defaults.translation_queue_size)
         config = SessionConfig(
             target_language=st.text_input("Target language", value=defaults.target_language),
             source_language_mode=st.selectbox(
@@ -62,6 +69,12 @@ def _sidebar_config(defaults: SessionConfig) -> tuple[SessionConfig, bool, bool,
             max_visible_lines=defaults.max_visible_lines,
             provisional_debounce_ms=defaults.provisional_debounce_ms,
             final_silence_ms=defaults.final_silence_ms,
+            receiver_queue_size=int(receiver_queue_size),
+            audio_ring_buffer_seconds=float(audio_ring_buffer_seconds),
+            asr_window_ms=int(asr_window_ms),
+            asr_overlap_ms=int(min(asr_overlap_ms, asr_window_ms - 100)),
+            asr_poll_interval_ms=int(asr_poll_interval_ms),
+            translation_queue_size=int(translation_queue_size),
         )
     return config, start_clicked, stop_clicked, debug
 
@@ -97,6 +110,25 @@ def _set_microphone_state(orchestrator: LiveSubtitleOrchestrator, desired: bool,
     else:
         state = "inactive"
     orchestrator.state.set_worker_health(microphone_state=state)
+
+
+def _receiver_queue_size(ctx) -> int | None:
+    receiver = getattr(ctx, "audio_receiver", None)
+    if receiver is None:
+        return None
+    for attr in ("_frames_queue", "_queue", "queue"):
+        candidate = getattr(receiver, attr, None)
+        if candidate is not None and hasattr(candidate, "qsize"):
+            try:
+                return int(candidate.qsize())
+            except Exception:
+                return None
+    if hasattr(receiver, "qsize"):
+        try:
+            return int(receiver.qsize())
+        except Exception:
+            return None
+    return None
 
 
 def _drain_audio_frames(orchestrator: LiveSubtitleOrchestrator, ctx) -> int:
@@ -165,7 +197,7 @@ def render_app() -> None:
         media_stream_constraints={"audio": True, "video": False},
         frontend_rtc_configuration=rtc_settings.frontend_rtc_configuration,
         server_rtc_configuration=rtc_settings.server_rtc_configuration,
-        audio_receiver_size=256,
+        audio_receiver_size=config.receiver_queue_size,
         sendback_audio=False,
     )
 
@@ -175,6 +207,7 @@ def render_app() -> None:
         orchestrator.stop()
 
     _set_microphone_state(orchestrator, desired_streaming, ctx.state.playing, ctx.state.signalling)
+    orchestrator.update_receiver_metrics(_receiver_queue_size(ctx), queue_capacity=config.receiver_queue_size)
     drained = _drain_audio_frames(orchestrator, ctx) if ctx.state.playing else 0
     if drained:
         orchestrator.state.set_debug("last_streamlit_webrtc_frame_batch", {"frames": drained})
@@ -186,8 +219,9 @@ def render_app() -> None:
         st.markdown(
             "- **Capture:** browser microphone via `streamlit-webrtc` (`webrtc_streamer`, SENDONLY mode).\n"
             f"- **RTC mode:** `{rtc_settings.mode}`; TURN configured=`{rtc_settings.turn_configured}`.\n"
-            "- **ASR:** chunked audio is sent to local `faster-whisper`.\n"
-            "- **Translation:** stable segments are translated via the configured local OpenAI-compatible endpoint.\n"
+            "- **Hot path:** the Streamlit/WebRTC drain only normalizes PCM and appends it into a bounded latest-audio ring buffer.\n"
+            "- **ASR:** a dedicated worker wakes on a rolling interval, transcribes the most recent overlapping window with local `faster-whisper`, and skips stale intermediate windows if it falls behind.\n"
+            "- **Translation:** a separate worker translates provisional/final transcript revisions via the configured local OpenAI-compatible endpoint.\n"
             "- **No Hugging Face TURN fallback remains:** all RTC config is explicit and environment-driven."
         )
         st.subheader("Still not magic")
