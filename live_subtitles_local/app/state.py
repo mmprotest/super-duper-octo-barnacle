@@ -23,9 +23,21 @@ class WorkerHealth:
 class MetricsSnapshot:
     audio_queue_size: int = 0
     translation_queue_size: int = 0
+    receiver_queue_size: int | None = None
+    receiver_queue_capacity: int = 0
     last_asr_latency_ms: int | None = None
+    average_asr_latency_ms: int | None = None
+    asr_worker_lag_ms: int | None = None
     last_translation_latency_ms: int | None = None
     received_audio_frames: int = 0
+    ring_buffer_fill_samples: int = 0
+    ring_buffer_capacity_samples: int = 0
+    ring_buffer_fill_ms: int = 0
+    dropped_audio_chunks: int = 0
+    dropped_audio_samples: int = 0
+    dropped_stale_asr_windows: int = 0
+    stale_asr_skips: int = 0
+    dropped_translation_jobs: int = 0
 
 
 @dataclass(slots=True)
@@ -100,6 +112,13 @@ class ThreadSafeAppState:
         with self._lock:
             for key, value in kwargs.items():
                 setattr(self._metrics, key, value)
+
+    def increment_metric(self, key: str, amount: int = 1) -> int:
+        with self._lock:
+            current = getattr(self._metrics, key)
+            updated = (current or 0) + amount
+            setattr(self._metrics, key, updated)
+            return updated
 
     def set_error(self, message: str | None) -> None:
         with self._lock:

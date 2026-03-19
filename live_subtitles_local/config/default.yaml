@@ -14,5 +14,11 @@ show_translation: true
 max_visible_lines: 6
 provisional_debounce_ms: 450
 final_silence_ms: 1200
+receiver_queue_size: 1024
+audio_ring_buffer_seconds: 8.0
+asr_window_ms: 3200
+asr_overlap_ms: 800
+asr_poll_interval_ms: 350
+translation_queue_size: 64
 silence_threshold: 0.008
 audio_chunk_ms: 800

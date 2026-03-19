@@ -13,6 +13,4 @@ class TranslationJob:
 
 @dataclass(slots=True)
 class PipelineQueues:
-    audio_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=32))
-    asr_results_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=32))
-    translation_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=32))
+    translation_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))
