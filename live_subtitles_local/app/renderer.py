@@ -17,19 +17,28 @@ MIC_STATUS = {
 def render_subtitles(snapshot: AppSnapshot, debug: bool = False) -> None:
     live = snapshot.live_transcript
     current_translation = snapshot.current_translation
-    mic_icon, mic_label = MIC_STATUS[snapshot.worker_health.microphone_state]
+    health = snapshot.worker_health
+    mic_icon, mic_label = MIC_STATUS[health.microphone_state]
 
     st.subheader("Session status")
     col1, col2, col3 = st.columns(3)
     col1.metric("Microphone", mic_label)
-    col2.metric("ASR worker", "ready" if snapshot.worker_health.asr_loaded else "unavailable")
-    col3.metric("Translator", "ready" if snapshot.worker_health.translation_ready else "unavailable")
+    col2.metric("ASR worker", "ready" if health.asr_loaded else "unavailable")
+    col3.metric("Translator", "ready" if health.translation_ready else "unavailable")
     st.caption(
         f"{mic_icon} {mic_label} · audio frames={snapshot.metrics.received_audio_frames} · "
         f"audio queue={snapshot.metrics.audio_queue_size} · translation queue={snapshot.metrics.translation_queue_size}"
     )
-    if snapshot.worker_health.translator_last_error:
-        st.caption(f"Translator health detail: {snapshot.worker_health.translator_last_error}")
+    if health.translator_last_error:
+        st.caption(f"Translator health detail: {health.translator_last_error}")
+
+    st.subheader("RTC configuration")
+    rtc_col1, rtc_col2, rtc_col3 = st.columns(3)
+    rtc_col1.metric("RTC mode", health.rtc_mode)
+    rtc_col2.metric("TURN", "configured" if health.rtc_turn_configured else "not configured")
+    rtc_col3.metric("RTC failure source", "likely RTC config" if health.microphone_state == "failed" and not health.rtc_turn_configured and health.rtc_mode == "remote_env" else "not implied")
+    st.caption(health.rtc_description)
+    st.info(health.rtc_connection_guidance)
 
     if snapshot.config.show_source:
         st.subheader("Current source subtitle")
@@ -37,12 +46,19 @@ def render_subtitles(snapshot: AppSnapshot, debug: bool = False) -> None:
             st.markdown(f"### {STATE_EMOJI.get(live.state, '•')} {live.text}")
             st.caption(f"state={live.state} revision={live.revision} lang={live.source_lang or 'auto'}")
         else:
-            if snapshot.worker_health.microphone_state == "active":
+            if health.microphone_state == "active":
                 st.info("Listening for speech. Speak into the browser microphone input.")
-            elif snapshot.worker_health.microphone_state == "starting":
+            elif health.microphone_state == "starting":
                 st.info("Waiting for the browser to grant microphone access and start streaming.")
-            elif snapshot.worker_health.microphone_state == "failed":
-                st.error("The browser microphone stream did not start. Check permissions, HTTPS/localhost, and WebRTC support.")
+            elif health.microphone_state == "failed":
+                if health.rtc_mode == "remote_env" and not health.rtc_turn_configured:
+                    st.error(
+                        "The browser microphone stream did not start. Remote mode is running without TURN, so RTC configuration is a likely cause."
+                    )
+                else:
+                    st.error(
+                        "The browser microphone stream did not start. Check permissions, HTTPS/localhost, and browser WebRTC support before assuming TURN is required."
+                    )
             else:
                 st.info("Microphone streaming is inactive.")
 
@@ -54,7 +70,7 @@ def render_subtitles(snapshot: AppSnapshot, debug: bool = False) -> None:
                 f"state={current_translation.state} latency={current_translation.latency_ms} ms target={current_translation.target_lang}"
             )
         else:
-            if snapshot.worker_health.translation_ready:
+            if health.translation_ready:
                 st.info("Translation appears after Whisper stabilizes a segment to provisional or final.")
             else:
                 st.warning("Translation is unavailable because the local OpenAI-compatible endpoint is not healthy.")

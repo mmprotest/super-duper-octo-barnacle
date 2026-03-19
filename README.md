@@ -1,17 +1,75 @@
 # Local-first live subtitles MVP
 
-This repository now uses the architecture that is most likely to produce a working local MVP without pretending Streamlit is something it is not:
+This repository is built for a **local-first** browser-to-local-server workflow:
 
 - **Browser microphone capture:** `streamlit-webrtc`
 - **Transcription:** local `faster-whisper`
 - **Translation:** local OpenAI-compatible endpoint such as `http://127.0.0.1:1234/v1`
 - **UI + polling:** Streamlit
 
-## Why FastRTC was removed
+## Why Hugging Face TURN was removed
 
-FastRTC can be a good fit for a dedicated realtime service, but the previous app was not actually using it. It exposed a fake `Start` button, a fake input-device field, and a placeholder transport layer that never connected browser microphone audio to Whisper.
+`streamlit-webrtc` can auto-populate ICE servers when no RTC configuration is provided. In practice, that meant the app could implicitly reach for third-party TURN/STUN providers, including a Hugging Face TURN credential flow exposed through the underlying WebRTC package.
 
-For a local MVP inside one Streamlit app, `streamlit-webrtc` is the cleaner choice because it gives Streamlit a real browser microphone transport instead of a scaffold. That means this repository is now honestly Streamlit-native rather than a Streamlit UI wrapped around an unwired FastRTC abstraction.
+That is the wrong tradeoff for this project:
+
+- the app is supposed to work locally without depending on Hugging Face,
+- localhost browser-to-local-server audio capture does **not** normally need TURN,
+- startup should not fail just because an external TURN provider is unavailable,
+- remote TURN should be explicit and environment-driven instead of hidden fallback behavior.
+
+This repository now passes **explicit RTC configuration** into `streamlit-webrtc` so Hugging Face TURN is not used at all.
+
+## Does localhost actually need TURN?
+
+Usually, **no**.
+
+For a browser connecting to a server running on the same machine via `localhost`, WebRTC can typically work with direct/local ICE candidates and no TURN relay. In that setup, the usual failure causes are:
+
+- browser microphone permission was denied,
+- the page is not running on `localhost` or HTTPS,
+- browser WebRTC support is blocked or broken,
+- some other local networking/browser policy issue exists.
+
+TURN becomes much more important for **remote deployments**, especially when browsers and servers sit behind NAT, restrictive firewalls, containers, proxies, or different networks.
+
+## RTC configuration modes
+
+The app now supports two explicit modes:
+
+### `LOCAL_DEV=true`
+
+Use direct/local ICE configuration only.
+
+- No Hugging Face TURN
+- No implicit external TURN lookup
+- No fake TURN defaults
+- The UI clearly reports that TURN is not configured
+
+Example:
+
+```bash
+LOCAL_DEV=true python live_subtitles_local/main.py
+```
+
+### `REMOTE_DEPLOYMENT=true`
+
+Allow external ICE/TURN configuration from environment variables.
+
+Supported configuration paths:
+
+1. **Generic explicit ICE config**
+   - `RTC_ICE_SERVERS_JSON` with a JSON list of ICE server objects
+2. **Cloudflare/custom TURN style env vars**
+   - `STUN_URLS`
+   - `TURN_URLS`
+   - `TURN_USERNAME`
+   - `TURN_CREDENTIAL`
+3. **Twilio credentials**
+   - `TWILIO_ACCOUNT_SID`
+   - `TWILIO_AUTH_TOKEN`
+
+If `REMOTE_DEPLOYMENT=true` is set without TURN, the app still starts, but the UI and logs will say that TURN is **not configured** and remote WebRTC connectivity may fail because of RTC config.
 
 ## Architecture
 
@@ -28,17 +86,20 @@ Browser microphone (streamlit-webrtc / WebRTC)
 
 ## What works cleanly
 
-- Start/Stop now control an actual browser microphone stream request plus backend processing.
+- Start/Stop control a real browser microphone stream.
 - Whisper receives real audio frames from the browser media stream.
+- RTC configuration is explicit instead of relying on implicit provider fallback.
+- The UI shows whether RTC is using local/direct mode or remote env-driven mode.
+- The UI shows whether TURN is configured.
 - Translation health is derived from an actual `/models` health check plus runtime translation success/failure.
 - The UI shows microphone state as `inactive`, `starting`, `active`, or `failed`.
 
 ## What does not work magically
 
-- This is still **not token-level realtime translation**. Translation happens on stabilized segments.
+- This is still **not token-level realtime translation**.
 - Browser microphone access still depends on **localhost or HTTPS** and user permission.
-- If your local model server does not expose a compatible `/models` route, translator health will show as unavailable until translation requests succeed.
 - Whisper latency depends heavily on GPU, model size, and chunk duration.
+- Remote deployments may still require TURN depending on network topology.
 
 ## Local runtime requirements
 
@@ -50,7 +111,7 @@ Browser microphone (streamlit-webrtc / WebRTC)
 ## Project layout
 
 - `live_subtitles_local/app`: Streamlit UI, rendering, and app state
-- `live_subtitles_local/rtc`: audio normalization/chunking helpers and stream event dataclasses
+- `live_subtitles_local/rtc`: audio normalization/chunking helpers and RTC mode/config helpers
 - `live_subtitles_local/asr`: dataclasses, Whisper wrapper, and transcript stabilizer
 - `live_subtitles_local/translation`: prompt, client, translator, and in-memory cache
 - `live_subtitles_local/pipeline`: orchestration, queues, and stale job scheduling
@@ -58,7 +119,7 @@ Browser microphone (streamlit-webrtc / WebRTC)
 - `live_subtitles_local/config/default.yaml`: sane local defaults
 - `live_subtitles_local/tests`: lightweight unit tests
 
-## Running it
+## Running it locally
 
 1. Create and activate a virtualenv.
 2. Install dependencies:
@@ -66,20 +127,53 @@ Browser microphone (streamlit-webrtc / WebRTC)
    pip install -r requirements.txt
    ```
 3. Start your local OpenAI-compatible translation server.
-4. Start the Streamlit app:
+4. Start the app in local mode:
    ```bash
-   python live_subtitles_local/main.py
+   LOCAL_DEV=true python live_subtitles_local/main.py
    ```
 5. Open the displayed localhost URL in a browser.
-6. Click **Start** in the sidebar and allow microphone access when the browser asks.
+6. Click **Start** in the sidebar and allow microphone access when prompted.
 
-## Exact commands
+## Remote deployment TURN examples
+
+### Example: custom or Cloudflare-style TURN env vars
+
+```bash
+export REMOTE_DEPLOYMENT=true
+export STUN_URLS=stun:stun.cloudflare.com:3478
+export TURN_URLS=turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349
+export TURN_USERNAME=your-username
+export TURN_CREDENTIAL=your-password
+python live_subtitles_local/main.py
+```
+
+### Example: explicit ICE JSON
+
+```bash
+export REMOTE_DEPLOYMENT=true
+export RTC_ICE_SERVERS_JSON='[
+  {"urls": ["stun:stun.cloudflare.com:3478"]},
+  {"urls": ["turn:turn.example.com:3478"], "username": "user", "credential": "pass"}
+]'
+python live_subtitles_local/main.py
+```
+
+### Example: Twilio
+
+```bash
+export REMOTE_DEPLOYMENT=true
+export TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+python live_subtitles_local/main.py
+```
+
+## Exact local commands
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python live_subtitles_local/main.py
+LOCAL_DEV=true python live_subtitles_local/main.py
 ```
 
 ## Known limitations / still stubbed
@@ -87,4 +181,4 @@ python live_subtitles_local/main.py
 - There is no device picker yet; capture uses the browser's selected/default microphone through WebRTC.
 - Transcript stabilization is chunk-based rather than a true incremental streaming decoder.
 - Export actions are implemented in code but not yet surfaced as clickable UI controls.
-- No screenshot artifact is included in this repository because that depends on browser tooling outside the app itself.
+- No screenshot artifact is included in this repository because browser screenshot tooling is not available in this environment.
