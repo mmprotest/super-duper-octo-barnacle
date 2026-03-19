@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "live-local-subtitles"
+version = "0.1.0"
+description = "Fully local live transcription and translation subtitles app"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "OpenAI Codex" }]
+dependencies = [
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+  "requests>=2.32",
+  "streamlit>=1.40",
+  "sounddevice>=0.4.7",
+  "scipy>=1.13",
+  "faster-whisper>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-timeout>=2.3",
+]
+
+[project.scripts]
+live-local-subtitles = "live_local_subtitles.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["live_local_subtitles*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["live_local_subtitles/tests"]

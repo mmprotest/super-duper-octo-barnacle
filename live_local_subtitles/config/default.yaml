@@ -1,0 +1,50 @@
+audio:
+  device: null
+  channels: 1
+  input_sample_rate: 16000
+  target_sample_rate: 16000
+  frame_ms: 100
+  window_ms: 2200
+  step_ms: 400
+  overlap_ms: 1800
+  max_buffer_ms: 12000
+  vad_threshold: 0.012
+  vad_hangover_ms: 450
+
+whisper:
+  model_size: large-v3
+  device: cuda
+  compute_type: float16
+  beam_size: 1
+  best_of: 1
+  language: null
+  task: transcribe
+  condition_on_previous_text: false
+  vad_filter: false
+  no_speech_threshold: 0.5
+  word_timestamps: false
+  temperature: 0.0
+
+stabilizer:
+  stability_similarity: 0.88
+  provisional_repeats: 2
+  final_silence_ms: 900
+  max_segment_gap_ms: 1200
+
+llm:
+  base_url: http://127.0.0.1:1234/v1
+  api_key: local
+  model: qwen/qwen3.5-9b-instruct
+  timeout_s: 6.0
+  temperature: 0.1
+  max_tokens: 96
+
+translator:
+  enabled: true
+  debounce_ms: 300
+  request_timeout_s: 6.0
+  context_segments: 3
+  stale_revision_margin: 0
+
+ui:
+  target_lang: English
